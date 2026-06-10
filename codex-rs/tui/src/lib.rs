@@ -914,6 +914,14 @@ pub async fn run_main(
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
     let strict_config = cli.strict_config;
+    let initial_thread_name = match cli.thread_name.take() {
+        Some(name) => Some(
+            crate::chatwidget::normalize_thread_name(&name).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "`--name` cannot be empty")
+            })?,
+        ),
+        None => None,
+    };
     let (sandbox_mode, approval_policy) = if cli.dangerously_bypass_approvals_and_sandbox {
         (
             Some(SandboxMode::DangerFullAccess),
@@ -1324,6 +1332,7 @@ pub async fn run_main(
         log_db,
         state_db,
         environment_manager,
+        initial_thread_name,
     )
     .await
     .map_err(|err| std::io::Error::other(err.to_string()))
@@ -1346,6 +1355,7 @@ async fn run_ratatui_app(
     log_db: Option<log_db::LogDbLayer>,
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
+    initial_thread_name: Option<String>,
 ) -> color_eyre::Result<AppExitInfo> {
     let uses_remote_workspace = app_server_target.uses_remote_workspace();
     color_eyre::install()?;
@@ -1853,6 +1863,7 @@ async fn run_ratatui_app(
         startup_elapsed_before_app,
         startup_bootstrap,
         startup_hooks_browser,
+        initial_thread_name,
     )
     .await;
 

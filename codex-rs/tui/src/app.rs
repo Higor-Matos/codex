@@ -623,6 +623,7 @@ async fn resolve_runtime_model_provider_base_url(provider: &ModelProviderInfo) -
 fn spawn_startup_thread_start(
     app_server: &AppServerSession,
     config: Config,
+    initial_thread_name: Option<String>,
     app_event_tx: AppEventSender,
 ) {
     let request_handle = app_server.request_handle();
@@ -634,6 +635,7 @@ fn spawn_startup_thread_start(
             config,
             thread_params_mode,
             remote_cwd_override,
+            initial_thread_name,
         )
         .await
         .map_err(|err| format!("{err:#}"));
@@ -769,6 +771,7 @@ impl App {
         startup_elapsed_before_app: Duration,
         startup_bootstrap: Option<AppServerBootstrap>,
         startup_hooks_browser: Option<HooksListEntry>,
+        initial_thread_name: Option<String>,
     ) -> Result<AppExitInfo> {
         use tokio_stream::StreamExt;
         let startup_started_at = Instant::now();
@@ -869,7 +872,12 @@ impl App {
         );
         let (mut chat_widget, initial_started_thread) = match session_selection {
             SessionSelection::StartFresh | SessionSelection::Exit => {
-                spawn_startup_thread_start(&app_server, config.clone(), app_event_tx.clone());
+                spawn_startup_thread_start(
+                    &app_server,
+                    config.clone(),
+                    initial_thread_name,
+                    app_event_tx.clone(),
+                );
                 // Count a startup tooltip once the initial chat widget can render it.
                 let startup_tooltip_override =
                     prepare_startup_tooltip_override(&mut config, &available_models, is_first_run)

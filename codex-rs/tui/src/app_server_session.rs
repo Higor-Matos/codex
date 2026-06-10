@@ -1112,8 +1112,9 @@ pub(crate) async fn start_thread_with_request_handle(
     config: Config,
     thread_params_mode: ThreadParamsMode,
     remote_cwd_override: Option<PathBuf>,
+    initial_thread_name: Option<String>,
 ) -> Result<AppServerStartedThread> {
-    let response: ThreadStartResponse = request_handle
+    let mut response: ThreadStartResponse = request_handle
         .request_typed(ClientRequest::ThreadStart {
             request_id: RequestId::String(format!("startup-thread-start-{}", Uuid::new_v4())),
             params: thread_start_params_from_config(
@@ -1125,6 +1126,24 @@ pub(crate) async fn start_thread_with_request_handle(
         })
         .await
         .map_err(|err| bootstrap_request_error("thread/start failed during TUI bootstrap", err))?;
+    if let Some(name) = initial_thread_name {
+        let _: ThreadSetNameResponse = request_handle
+            .request_typed(ClientRequest::ThreadSetName {
+                request_id: RequestId::String(format!(
+                    "startup-thread-set-name-{}",
+                    Uuid::new_v4()
+                )),
+                params: ThreadSetNameParams {
+                    thread_id: response.thread.id.clone(),
+                    name: name.clone(),
+                },
+            })
+            .await
+            .map_err(|err| {
+                bootstrap_request_error("thread/name/set failed during TUI bootstrap", err)
+            })?;
+        response.thread.name = Some(name);
+    }
     started_thread_from_start_response(response, &config, thread_params_mode).await
 }
 

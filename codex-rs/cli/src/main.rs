@@ -394,11 +394,25 @@ impl Args for SessionTuiCli {
 
 impl clap::FromArgMatches for SessionTuiCli {
     fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        TuiCli::from_arg_matches(matches).map(Self)
+        let cli = TuiCli::from_arg_matches(matches)?;
+        if cli.thread_name.is_some() {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ArgumentConflict,
+                "`--name` is only supported when starting a fresh interactive session",
+            ));
+        }
+        Ok(Self(cli))
     }
 
     fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        self.0.update_from_arg_matches(matches)
+        self.0.update_from_arg_matches(matches)?;
+        if self.0.thread_name.is_some() {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ArgumentConflict,
+                "`--name` is only supported when starting a fresh interactive session",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -942,6 +956,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     let root_remote_auth_token_env = remote.remote_auth_token_env;
     let root_strict_config = interactive.strict_config;
     reject_root_strict_config_for_subcommand(root_strict_config, &subcommand)?;
+    reject_root_thread_name_for_subcommand(interactive.thread_name.as_deref(), &subcommand)?;
     if let Some(subcommand) = subcommand.as_ref() {
         profile_v2_for_subcommand(&interactive, subcommand)?;
     }
@@ -2003,6 +2018,56 @@ fn reject_root_strict_config_for_subcommand(
     }
 }
 
+fn reject_root_thread_name_for_subcommand(
+    thread_name: Option<&str>,
+    subcommand: &Option<Subcommand>,
+) -> anyhow::Result<()> {
+    if thread_name.is_none() {
+        return Ok(());
+    }
+    let Some(subcommand_name) = subcommand_name_for_thread_name_reject(subcommand) else {
+        return Ok(());
+    };
+    anyhow::bail!(
+        "`--name` is only supported when starting a fresh interactive session, not `codex {subcommand_name}`"
+    )
+}
+
+fn subcommand_name_for_thread_name_reject(subcommand: &Option<Subcommand>) -> Option<&'static str> {
+    match subcommand {
+        None => None,
+        Some(Subcommand::Exec(_)) => Some("exec"),
+        Some(Subcommand::Review(_)) => Some("review"),
+        Some(Subcommand::Login(_)) => Some("login"),
+        Some(Subcommand::Logout(_)) => Some("logout"),
+        Some(Subcommand::Mcp(_)) => Some("mcp"),
+        Some(Subcommand::Plugin(_)) => Some("plugin"),
+        Some(Subcommand::McpServer(_)) => Some("mcp-server"),
+        Some(Subcommand::AppServer(app_server)) => {
+            Some(app_server_subcommand_name(app_server.subcommand.as_ref()))
+        }
+        Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        Some(Subcommand::App(_)) => Some("app"),
+        Some(Subcommand::Completion(_)) => Some("completion"),
+        Some(Subcommand::Update) => Some("update"),
+        Some(Subcommand::Doctor(_)) => Some("doctor"),
+        Some(Subcommand::Sandbox(_)) => Some("sandbox"),
+        Some(Subcommand::Debug(_)) => Some("debug"),
+        Some(Subcommand::Execpolicy(_)) => Some("execpolicy"),
+        Some(Subcommand::Apply(_)) => Some("apply"),
+        Some(Subcommand::Resume(_)) => Some("resume"),
+        Some(Subcommand::Archive(_)) => Some("archive"),
+        Some(Subcommand::Unarchive(_)) => Some("unarchive"),
+        Some(Subcommand::Fork(_)) => Some("fork"),
+        Some(Subcommand::Cloud(_)) => Some("cloud"),
+        Some(Subcommand::ResponsesApiProxy(_)) => Some("responses-api-proxy"),
+        Some(Subcommand::StdioToUds(_)) => Some("stdio-to-uds"),
+        Some(Subcommand::ExecServer(_)) => Some("exec-server"),
+        Some(Subcommand::Features(_)) => Some("features"),
+    }
+}
+
 /// Return the selected subcommand name when a root-level `--strict-config`
 /// flag should be rejected after parsing.
 ///
@@ -3044,6 +3109,46 @@ mod tests {
                 "To continue this session, run codex resume, then select my-thread (123e4567-e89b-12d3-a456-426614174000)".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn root_name_flag_parses_for_fresh_interactive_session() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--name", "desc-pay refund panel"])
+            .expect("parse");
+
+        assert_eq!(
+            cli.interactive.thread_name.as_deref(),
+            Some("desc-pay refund panel")
+        );
+        assert!(cli.subcommand.is_none());
+    }
+
+    #[test]
+    fn root_name_flag_is_rejected_for_subcommands() {
+        let cli = MultitoolCli::try_parse_from(["codex", "--name", "work", "resume"])
+            .expect("root flag parses before post-parse validation");
+
+        let err = reject_root_thread_name_for_subcommand(
+            cli.interactive.thread_name.as_deref(),
+            &cli.subcommand,
+        )
+        .expect_err("root --name should not apply to subcommands");
+
+        assert_eq!(
+            err.to_string(),
+            "`--name` is only supported when starting a fresh interactive session, not `codex resume`"
+        );
+    }
+
+    #[test]
+    fn session_commands_reject_scoped_name_flag() {
+        let err = MultitoolCli::try_parse_from(["codex", "resume", "--name", "work"])
+            .expect_err("resume --name should be rejected");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+        let err = MultitoolCli::try_parse_from(["codex", "fork", "--name", "work"])
+            .expect_err("fork --name should be rejected");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]

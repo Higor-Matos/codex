@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
     pub prompt: Option<String>,
 
+    /// User-facing name for a fresh interactive session.
+    #[arg(long = "name", value_name = "THREAD_NAME")]
+    pub thread_name: Option<String>,
+
     /// Error out when config.toml contains fields that are not recognized by this version of Codex.
     #[arg(long = "strict-config", default_value_t = false)]
     pub strict_config: bool,
